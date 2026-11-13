@@ -28,6 +28,6 @@ The site uses Supabase's publishable key, which can only read what the database 
 
 The rules are set in the database itself, so the site cannot leak a closed field even by mistake.
 
-## Turning on "Report incorrect info"
+## "Report incorrect info"
 
-Put the pre-filled Google Form link in `REPORT_FORM_URL` in `wrangler.jsonc`. It must end with `=` so the company name can be added after it.
+Each company page links to the Google Form set in `REPORT_FORM_URL` in `wrangler.jsonc`. If that value is a pre-filled link ending in `=`, the company name is added after it so the form opens with the company filled in.

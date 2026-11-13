@@ -7,8 +7,8 @@
 //   SUPABASE_KEY     the publishable key (safe to publish; the database only
 //                    lets it read the free fields)
 //   HUB_URL          the Property and Technology hub
-//   REPORT_FORM_URL  pre-filled Google Form link ending in "=", or "" to hide
-//                    the "Report incorrect info" link
+//   REPORT_FORM_URL  the "Report incorrect info" form. A pre-filled link ending
+//                    in "=" gets the company name added; "" hides the link
 
 const NEWSLETTER = 'https://evanprothro-newsletter.beehiiv.com/subscribe?utm_source=propertyandtechnology&utm_medium=directory';
 const JOBS = 'https://www.propertyandtechnologyjobs.com/?utm_source=propertyandtechnology&utm_medium=directory';
@@ -25,7 +25,9 @@ const DETAIL_FIELDS = [
 ].join(',');
 
 const BANDS = ['50,000+', '25,000-50,000', '10,000-25,000', '5,000-10,000', '1,000-5,000', 'Under 1,000'];
-const TYPE_LABEL = { operator: 'Operator', proptech: 'Proptech', capital: 'Capital', other: 'Other', unclassified: 'Unclassified' };
+const TYPE_LABEL = { operator: 'Operator', proptech: 'Proptech', capital: 'Capital', other: 'Other real estate', unclassified: 'Unclassified' };
+// Rental operators lead every list; other real estate firms come last.
+const TYPE_ORDER = { operator: 0, proptech: 1, capital: 2, other: 3, unclassified: 4 };
 
 // ---------- helpers ----------
 
@@ -46,7 +48,8 @@ async function db(env, path) {
 let listCache = { at: 0, rows: null };
 async function allCompanies(env) {
   if (listCache.rows && Date.now() - listCache.at < 60_000) return listCache.rows;
-  const rows = await db(env, `companies?select=${LIST_FIELDS}&merged_into=is.null&order=company_type.asc,open_roles.desc.nullslast,name.asc&limit=5000`);
+  const rows = await db(env, `companies?select=${LIST_FIELDS}&merged_into=is.null&order=open_roles.desc.nullslast,name.asc&limit=5000`);
+  rows.sort((a, b) => (TYPE_ORDER[a.company_type] ?? 9) - (TYPE_ORDER[b.company_type] ?? 9));
   listCache = { at: Date.now(), rows };
   return rows;
 }
@@ -141,6 +144,7 @@ async function listPage(env, url) {
   const states = [...new Set(all.map((c) => c.hq_state).filter(Boolean))].sort();
   const operators = all.filter((c) => c.company_type === 'operator').length;
   const proptech = all.filter((c) => c.company_type === 'proptech').length;
+  const others = all.length - operators - proptech;
   const roles = all.reduce((n, c) => n + (c.open_roles || 0), 0);
   const filtered = q || type || state || bandSel || hiring;
   const opt = (v, label, sel) => `<option value="${esc(v)}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
@@ -148,13 +152,13 @@ async function listPage(env, url) {
   const body = `<section class="hero">
   <div class="eyebrow">Directory</div>
   <h1>Who runs <span class="grad">scattered site rentals</span>, and who sells to them.</h1>
-  <p class="sub">${num(operators)} operators and ${num(proptech)} proptech companies, with unit bands, markets and ${num(roles)} open roles. Free while we build it out.</p>
+  <p class="sub">${num(operators)} rental operators and ${num(proptech)} proptech companies, with unit bands, markets and ${num(roles)} open roles${others ? `, plus ${num(others)} other real estate firms` : ''}. Free while we build it out.</p>
 </section>
 
 <section class="wrap">
   <form class="filters" method="get" action="/">
     <label class="f-search"><span>Search</span><input type="search" name="q" value="${esc(q)}" placeholder="Company or segment"></label>
-    <label><span>Type</span><select name="type">${opt('', 'All types', type)}${opt('operator', 'Operators', type)}${opt('proptech', 'Proptech', type)}</select></label>
+    <label><span>Type</span><select name="type">${opt('', 'All types', type)}${opt('operator', 'Operators', type)}${opt('proptech', 'Proptech', type)}${opt('other', 'Other real estate', type)}</select></label>
     <label><span>HQ state</span><select name="state">${opt('', 'All states', state)}${states.map((s) => opt(s, s, state)).join('')}</select></label>
     <label><span>Units</span><select name="band">${opt('', 'Any size', bandSel)}${BANDS.map((b) => opt(b, b, bandSel)).join('')}</select></label>
     <label class="f-check"><input type="checkbox" name="hiring" value="1"${hiring ? ' checked' : ''}><span>Hiring now</span></label>
@@ -196,7 +200,10 @@ async function companyPage(env, slug) {
   const site = safeUrl(c.website);
   const careers = safeUrl(c.careers_url);
   const sources = [sourceLine('Unit count', c.units_source), sourceLine('Markets', c.markets_source), sourceLine('Profile', c.profile_source)].join('');
-  const report = env.REPORT_FORM_URL ? `<a href="${esc(env.REPORT_FORM_URL + encodeURIComponent(c.name))}" target="_blank" rel="noopener noreferrer">Report incorrect info</a>` : '';
+  // A link ending in "=" is a pre-filled form link: the company name goes after it.
+  const formUrl = env.REPORT_FORM_URL || '';
+  const reportHref = formUrl.endsWith('=') ? formUrl + encodeURIComponent(c.name) : formUrl;
+  const report = safeUrl(reportHref) ? `<a href="${esc(reportHref)}" target="_blank" rel="noopener noreferrer">Report incorrect info</a>` : '';
   const fact = (label, value) => (value ? `<div class="fact"><dt>${esc(label)}</dt><dd>${value}</dd></div>` : '');
 
   const body = `<section class="hero hero-tight">
@@ -267,7 +274,8 @@ async function marketPage(env, slug) {
   const found = await db(env, `markets?slug=eq.${encodeURIComponent(slug)}&select=slug,name,company_markets(company:companies(${LIST_FIELDS}))&limit=1`);
   const m = found[0];
   if (!m) return notFound(env);
-  const rows = (m.company_markets || []).map((x) => x.company).filter((c) => c && !c.merged_into).sort((a, b) => a.name.localeCompare(b.name));
+  const rows = (m.company_markets || []).map((x) => x.company).filter((c) => c && !c.merged_into)
+    .sort((a, b) => (TYPE_ORDER[a.company_type] ?? 9) - (TYPE_ORDER[b.company_type] ?? 9) || a.name.localeCompare(b.name));
   const body = `<section class="hero hero-tight">
   <a class="back" href="/markets">&larr; Markets</a>
   <div class="eyebrow">Market</div>

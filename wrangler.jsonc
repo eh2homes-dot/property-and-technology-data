@@ -17,8 +17,8 @@
     // free fields; leaders, contacts and exact unit counts are closed to it.
     "SUPABASE_KEY": "sb_publishable_0UTqrGi92MCLVxh9N85LFg_AmQ5CKUq",
     "HUB_URL": "https://property-and-technology-hub.eh2homes.workers.dev",
-    // Pre-filled Google Form link for "Report incorrect info", ending in "=".
-    // Leave empty to hide the link.
-    "REPORT_FORM_URL": ""
+    // The "Report incorrect info" Google Form. To have each page fill in the
+    // company name, swap this for the form's pre-filled link, ending in "=".
+    "REPORT_FORM_URL": "https://docs.google.com/forms/d/e/1FAIpQLSfXeQcIydOk8UasrF7mEozlkO2GylRZzQXT6b6IyuLbmwUTTg/viewform"
   }
 }

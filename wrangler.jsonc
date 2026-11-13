@@ -1,0 +1,24 @@
+{
+  // Cloudflare deploy settings for the directory.
+  "name": "property-and-technology-data",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-13",
+  "observability": {
+    "enabled": true
+  },
+  // Files in public/ (styles, logo) are served directly. Every other address
+  // is handled by src/worker.js.
+  "assets": {
+    "directory": "./public"
+  },
+  "vars": {
+    "SUPABASE_URL": "https://mbdffbolmbgypevlrkvz.supabase.co",
+    // Publishable key: meant to be public. The database only lets it read the
+    // free fields; leaders, contacts and exact unit counts are closed to it.
+    "SUPABASE_KEY": "sb_publishable_0UTqrGi92MCLVxh9N85LFg_AmQ5CKUq",
+    "HUB_URL": "https://property-and-technology-hub.eh2homes.workers.dev",
+    // Pre-filled Google Form link for "Report incorrect info", ending in "=".
+    // Leave empty to hide the link.
+    "REPORT_FORM_URL": ""
+  }
+}

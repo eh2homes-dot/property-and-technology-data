@@ -9,6 +9,8 @@
 //   HUB_URL          the Property and Technology hub
 //   REPORT_FORM_URL  the "Report incorrect info" form. A pre-filled link ending
 //                    in "=" gets the company name added; "" hides the link
+//   ANALYTICS_TOKEN  Cloudflare Web Analytics site token (cookie-less visitor
+//                    counts). "" leaves tracking off
 
 const NEWSLETTER = 'https://evanprothro-newsletter.beehiiv.com/subscribe?utm_source=propertyandtechnology&utm_medium=directory';
 const JOBS = 'https://www.propertyandtechnologyjobs.com/?utm_source=propertyandtechnology&utm_medium=directory';
@@ -58,6 +60,10 @@ async function allCompanies(env) {
 
 function page(env, { title, description, path, body }) {
   const hub = esc(env.HUB_URL || '/');
+  const token = /^[a-f0-9]{16,64}$/i.test(env.ANALYTICS_TOKEN || '') ? env.ANALYTICS_TOKEN : '';
+  const beacon = token
+    ? `<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "${token}"}'></script>\n`
+    : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -101,7 +107,7 @@ ${body}
   </div>
   <p class="fnote">Figures come from company sites and public filings, with a source on each profile. Unit counts are shown as bands.</p>
 </footer>
-</body>
+${beacon}</body>
 </html>`;
 }
 

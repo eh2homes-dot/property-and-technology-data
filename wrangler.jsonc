@@ -22,6 +22,6 @@
     // (entry.1349695603 is that question's ID in the form).
     "REPORT_FORM_URL": "https://docs.google.com/forms/d/e/1FAIpQLSfXeQcIydOk8UasrF7mEozlkO2GylRZzQXT6b6IyuLbmwUTTg/viewform?usp=pp_url&entry.1349695603=",
     // Cloudflare Web Analytics site token. Empty means no visitor tracking.
-    "ANALYTICS_TOKEN": ""
+    "ANALYTICS_TOKEN": "73b40f0cefca4940b14c777e78284061"
   }
 }

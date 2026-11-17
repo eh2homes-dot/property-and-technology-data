@@ -31,6 +31,19 @@ const TYPE_LABEL = { operator: 'Operator', proptech: 'Proptech', capital: 'Capit
 // Rental operators lead every list; other real estate firms come last.
 const TYPE_ORDER = { operator: 0, proptech: 1, capital: 2, other: 3, unclassified: 4 };
 
+// Default list order: rental operators first, then largest unit band first,
+// then most open roles, then name. A company with no unit band sorts after
+// the smallest band.
+const bandRank = (c) => {
+  const ranks = [c.units_owned_range, c.units_managed_range].map((b) => BANDS.indexOf(b)).filter((i) => i >= 0);
+  return ranks.length ? Math.min(...ranks) : BANDS.length;
+};
+const bySize = (a, b) =>
+  (TYPE_ORDER[a.company_type] ?? 9) - (TYPE_ORDER[b.company_type] ?? 9) ||
+  bandRank(a) - bandRank(b) ||
+  (b.open_roles || 0) - (a.open_roles || 0) ||
+  a.name.localeCompare(b.name);
+
 // ---------- helpers ----------
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,7 +64,7 @@ let listCache = { at: 0, rows: null };
 async function allCompanies(env) {
   if (listCache.rows && Date.now() - listCache.at < 60_000) return listCache.rows;
   const rows = await db(env, `companies?select=${LIST_FIELDS}&merged_into=is.null&order=open_roles.desc.nullslast,name.asc&limit=5000`);
-  rows.sort((a, b) => (TYPE_ORDER[a.company_type] ?? 9) - (TYPE_ORDER[b.company_type] ?? 9));
+  rows.sort(bySize);
   listCache = { at: Date.now(), rows };
   return rows;
 }
@@ -281,7 +294,7 @@ async function marketPage(env, slug) {
   const m = found[0];
   if (!m) return notFound(env);
   const rows = (m.company_markets || []).map((x) => x.company).filter((c) => c && !c.merged_into)
-    .sort((a, b) => (TYPE_ORDER[a.company_type] ?? 9) - (TYPE_ORDER[b.company_type] ?? 9) || a.name.localeCompare(b.name));
+    .sort(bySize);
   const body = `<section class="hero hero-tight">
   <a class="back" href="/markets">&larr; Markets</a>
   <div class="eyebrow">Market</div>

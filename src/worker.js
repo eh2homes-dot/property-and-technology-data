@@ -5,26 +5,27 @@
 // Settings live in wrangler.jsonc under "vars":
 //   SUPABASE_URL     the project's API address
 //   SUPABASE_KEY     the publishable key (safe to publish; the database only
-//                    lets it read the free fields)
+//                    lets it read the two free views, directory_companies and
+//                    directory_markets)
 //   HUB_URL          the Property and Technology hub
 //   REPORT_FORM_URL  the "Report incorrect info" form. A pre-filled link ending
 //                    in "=" gets the company name added; "" hides the link
 //   ANALYTICS_TOKEN  Cloudflare Web Analytics site token (cookie-less visitor
 //                    counts). "" leaves tracking off
+//   PAID_URL         where "Get full access" buttons go (checkout or waitlist).
+//                    "" sends them to the Origins signup as a waitlist
+//
+// Free vs paid, modelled on the Thesis Driven database: the free pages show who
+// a company is, where it is, its size band and COUNTS (markets, leaders, open
+// roles). The lists behind those counts are the paid tier. The database
+// enforces this: the publishable key cannot read the lists at all.
 
 const NEWSLETTER = 'https://evanprothro-newsletter.beehiiv.com/subscribe?utm_source=propertyandtechnology&utm_medium=directory';
 const JOBS = 'https://www.propertyandtechnologyjobs.com/?utm_source=propertyandtechnology&utm_medium=directory';
 
-const LIST_FIELDS = 'id,slug,name,company_type,segment,hq_city,hq_state,units_owned_range,units_managed_range,open_roles,market_count,leader_count,merged_into';
-const DETAIL_FIELDS = [
-  'id,slug,name,company_type,segment,description,website,careers_url,hq_city,hq_state',
-  'units_owned_range,units_managed_range,open_roles,market_count,operating_states',
-  'scale_as_of,scale_note,leader_count,merged_into,last_verified_at',
-  'markets:company_markets(market:markets(slug,name))',
-  'units_source:sources!companies_units_source_id_fkey(url,title,publisher)',
-  'markets_source:sources!companies_markets_source_id_fkey(url,title,publisher)',
-  'profile_source:sources!companies_profile_source_id_fkey(url,title,publisher)',
-].join(',');
+const LIST_FIELDS = 'slug,name,company_type,segment,hq_city,hq_state,units_owned_range,units_managed_range,open_roles,market_count,leader_count';
+// How many operators a market page names before the rest are locked.
+const MARKET_PREVIEW = 3;
 
 const BANDS = ['50,000+', '25,000-50,000', '10,000-25,000', '5,000-10,000', '1,000-5,000', 'Under 1,000'];
 const TYPE_LABEL = { operator: 'Operator', proptech: 'Proptech', capital: 'Capital', other: 'Other real estate', unclassified: 'Unclassified' };
@@ -63,7 +64,7 @@ async function db(env, path) {
 let listCache = { at: 0, rows: null };
 async function allCompanies(env) {
   if (listCache.rows && Date.now() - listCache.at < 60_000) return listCache.rows;
-  const rows = await db(env, `companies?select=${LIST_FIELDS}&merged_into=is.null&order=open_roles.desc.nullslast,name.asc&limit=5000`);
+  const rows = await db(env, `directory_companies?select=${LIST_FIELDS}&merged_into_slug=is.null&order=open_roles.desc.nullslast,name.asc&limit=5000`);
   rows.sort(bySize);
   listCache = { at: Date.now(), rows };
   return rows;
@@ -139,6 +140,31 @@ function companyRow(c) {
   </a>`;
 }
 
+const paidUrl = (env) => safeUrl(env.PAID_URL) || `${NEWSLETTER}&utm_campaign=paid-waitlist`;
+const paidLabel = (env) => (safeUrl(env.PAID_URL) ? 'Get full access &rarr;' : 'Join the paid waitlist &rarr;');
+
+// A locked block: what is behind it, as counts, and the paid button.
+function lockCard(env, { eyebrow, headline, items, text }) {
+  const list = (items || []).filter(Boolean);
+  return `<div class="locked">
+      <div class="eyebrow">&#128274; ${esc(eyebrow)}</div>
+      ${headline ? `<p class="locked-n">${headline}</p>` : ''}
+      ${list.length ? `<ul class="locked-list">${list.map((i) => `<li>${i}</li>`).join('')}</ul>` : ''}
+      <p>${text}</p>
+      <a class="btn primary" href="${esc(paidUrl(env))}" target="_blank" rel="noopener noreferrer">${paidLabel(env)}</a>
+    </div>`;
+}
+
+// Grey placeholder rows that stand in for locked companies. They carry no data.
+const ghostRows = (n) => Array.from({ length: Math.min(n, 4) }, () => `<div class="row row-ghost" aria-hidden="true">
+    <span class="r-name"><span class="ph ph-l"></span><span class="ph ph-s"></span></span>
+    <span class="r-type"><span class="ph ph-s"></span></span>
+    <span class="r-cell"><span class="ph"></span></span>
+    <span class="r-cell"><span class="ph"></span></span>
+    <span class="r-cell"><span class="ph ph-s"></span></span>
+    <span class="r-cell"><span class="ph ph-s"></span></span>
+  </div>`).join('\n  ');
+
 const rowsHead = `<div class="row row-head" aria-hidden="true">
     <span>Company</span><span>Type</span><span>HQ</span><span>Units</span><span>Markets</span><span>Open roles</span>
   </div>`;
@@ -171,7 +197,7 @@ async function listPage(env, url) {
   const body = `<section class="hero">
   <div class="eyebrow">Directory</div>
   <h1>Who runs <span class="grad">scattered site rentals</span>, and who sells to them.</h1>
-  <p class="sub">${num(operators)} rental operators and ${num(proptech)} proptech companies, with unit bands, markets and ${num(roles)} open roles${others ? `, plus ${num(others)} other real estate firms` : ''}. Free while we build it out.</p>
+  <p class="sub">${num(operators)} rental operators and ${num(proptech)} proptech companies, with unit bands, market counts and ${num(roles)} open roles${others ? `, plus ${num(others)} other real estate firms` : ''}. Browsing is free. Leaders, market lists and signals are in the paid tier.</p>
 </section>
 
 <section class="wrap">
@@ -205,34 +231,39 @@ function sourceLine(label, s) {
 }
 
 async function companyPage(env, slug) {
-  const found = await db(env, `companies?slug=eq.${encodeURIComponent(slug)}&select=${DETAIL_FIELDS}&limit=1`);
+  const found = await db(env, `directory_companies?slug=eq.${encodeURIComponent(slug)}&select=*&limit=1`);
   const c = found[0];
   if (!c) return notFound(env);
 
-  const [jobs, survivor] = await Promise.all([
-    db(env, `job_postings?company_id=eq.${c.id}&select=title,category,level,location,apply_url,posted_at&order=posted_at.desc.nullslast&limit=12`),
-    c.merged_into ? db(env, `companies?id=eq.${c.merged_into}&select=slug,name&limit=1`) : Promise.resolve([]),
-  ]);
-
-  const markets = (c.markets || []).map((m) => m.market).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   const b = band(c);
   const site = safeUrl(c.website);
-  const careers = safeUrl(c.careers_url);
-  const sources = [sourceLine('Unit count', c.units_source), sourceLine('Markets', c.markets_source), sourceLine('Profile', c.profile_source)].join('');
+  const src = (k) => ({ url: c[`${k}_source_url`], title: c[`${k}_source_title`], publisher: c[`${k}_source_publisher`] });
+  const sources = [sourceLine('Unit count', src('units')), sourceLine('Markets', src('markets')), sourceLine('Profile', src('profile'))].join('');
   // A link ending in "=" is a pre-filled form link: the company name goes after it.
   const formUrl = env.REPORT_FORM_URL || '';
   const reportHref = formUrl.endsWith('=') ? formUrl + encodeURIComponent(c.name) : formUrl;
   const report = safeUrl(reportHref) ? `<a href="${esc(reportHref)}" target="_blank" rel="noopener noreferrer">Report incorrect info</a>` : '';
   const fact = (label, value) => (value ? `<div class="fact"><dt>${esc(label)}</dt><dd>${value}</dd></div>` : '');
+  const plural = (n, one, many) => `${num(n)} ${n === 1 ? one : many}`;
+
+  // What the paid tier holds for this company, as counts only.
+  const paidItems = [
+    c.leader_count ? `<b>${plural(c.leader_count, 'leader', 'leaders')}</b>: names, titles, LinkedIn` : '<b>Leaders</b>: names, titles, LinkedIn as we add them',
+    c.market_count ? `<b>${plural(c.market_count, 'market', 'markets')}</b>, listed by name` : '',
+    c.state_count ? `<b>${plural(c.state_count, 'operating state', 'operating states')}</b>` : '',
+    c.open_roles ? `<b>${plural(c.open_roles, 'open role', 'open roles')}</b> with level, location and pay where posted` : '',
+    c.tech_stack_count ? `<b>${plural(c.tech_stack_count, 'tool', 'tools')}</b> in their tech stack` : '',
+    '<b>Signals</b>: hires, leadership moves, events, funding',
+    '<b>CSV export</b> of the full directory',
+  ];
 
   const body = `<section class="hero hero-tight">
   <a class="back" href="/">&larr; Directory</a>
   <div class="eyebrow">${esc(TYPE_LABEL[c.company_type] || c.company_type)}${c.segment ? ' &middot; ' + esc(c.segment) : ''}</div>
   <h1>${esc(c.name)}</h1>
-  ${survivor[0] ? `<p class="notice">Now part of <a href="/companies/${esc(survivor[0].slug)}">${esc(survivor[0].name)}</a>.</p>` : ''}
+  ${c.merged_into_slug ? `<p class="notice">Now part of <a href="/companies/${esc(c.merged_into_slug)}">${esc(c.merged_into_name)}</a>.</p>` : ''}
   <div class="hero-actions">
     ${site ? `<a class="btn ghost-green" href="${esc(site)}" target="_blank" rel="noopener noreferrer">${esc(host(site))} &nearr;</a>` : ''}
-    ${careers ? `<a class="btn" href="${esc(careers)}" target="_blank" rel="noopener noreferrer">Careers page &nearr;</a>` : ''}
   </div>
 </section>
 
@@ -243,27 +274,22 @@ async function companyPage(env, slug) {
       ${fact('Headquarters', esc(hq(c)))}
       ${fact(bandKind(c) === 'managed' ? 'Homes managed' : 'Homes owned', b ? esc(b) : '')}
       ${fact('Markets', c.market_count ? num(c.market_count) : '')}
-      ${fact('Operating states', (c.operating_states || []).length ? esc(c.operating_states.join(', ')) : '')}
+      ${fact('Leaders on file', c.leader_count ? num(c.leader_count) : '')}
       ${fact('Open roles', c.open_roles ? num(c.open_roles) : '0')}
       ${fact('Figures as of', c.scale_as_of ? esc(c.scale_as_of) : '')}
     </dl>
+    ${c.description ? `<p class="note">${esc(c.description)}</p>` : ''}
     ${c.scale_note ? `<p class="note">${esc(c.scale_note)}</p>` : ''}
-
-    ${markets.length ? `<h2>Markets</h2>
-    <div class="chips">${markets.map((m) => `<a class="chip" href="/markets/${esc(m.slug)}">${esc(m.name)}</a>`).join('')}</div>` : ''}
-
-    <h2>Open roles</h2>
-    ${jobs.length ? `<ul class="jobs">${jobs.map((j) => `<li><a href="${esc(safeUrl(j.apply_url) || '#')}" target="_blank" rel="noopener noreferrer"><span class="j-title">${esc(j.title)}</span><span class="j-meta">${esc([j.location, j.level].filter(Boolean).join(' · '))}</span></a></li>`).join('')}</ul>
-    ${(c.open_roles || 0) > jobs.length ? `<p class="note">Showing ${jobs.length} of ${num(c.open_roles)}. <a href="${esc(JOBS)}" target="_blank" rel="noopener noreferrer">See them all on the job board</a>.</p>` : ''}` : '<p class="note">No open roles on file right now.</p>'}
+    ${c.open_roles ? `<p class="note">${esc(c.name)} has ${plural(c.open_roles, 'open role', 'open roles')}. <a href="${esc(JOBS)}" target="_blank" rel="noopener noreferrer">Browse jobs on the job board</a>.</p>` : ''}
   </div>
 
   <aside>
-    <div class="locked">
-      <div class="eyebrow">Leaders</div>
-      <p class="locked-n">${c.leader_count ? num(c.leader_count) + ' on file' : 'None on file yet'}</p>
-      <p>Names, titles and contact details will be part of the paid tier. Subscribe to Origins to hear when it opens.</p>
-      <a class="btn primary" href="${esc(NEWSLETTER)}" target="_blank" rel="noopener noreferrer">Get Origins &rarr;</a>
-    </div>
+    ${lockCard(env, {
+      eyebrow: 'Paid tier',
+      headline: 'The full profile',
+      items: paidItems,
+      text: 'Free pages show the counts. The paid tier opens the names and lists behind them.',
+    })}
     ${sources ? `<h2>Sources</h2><ul class="sources">${sources}</ul>` : ''}
     <p class="note">${c.last_verified_at ? 'Last checked ' + esc(String(c.last_verified_at).slice(0, 10)) + '. ' : ''}${report}</p>
   </aside>
@@ -274,46 +300,54 @@ async function companyPage(env, slug) {
 }
 
 async function marketsPage(env) {
-  const rows = await db(env, 'markets?select=slug,name,company_markets(company:companies(merged_into))&order=name.asc&limit=2000');
-  const items = rows
-    .map((m) => ({ ...m, n: (m.company_markets || []).filter((x) => x.company && !x.company.merged_into).length }))
-    .filter((m) => m.n > 0);
+  const items = await db(env, 'directory_markets?select=slug,name,operator_count&operator_count=gt.0&order=name.asc&limit=2000');
   const body = `<section class="hero hero-tight">
   <div class="eyebrow">Markets</div>
   <h1>Operators by market.</h1>
-  <p class="sub">${num(items.length)} markets, named the way each operator names them.</p>
+  <p class="sub">${num(items.length)} markets, named the way each operator names them. Each one shows its largest operators free; the full list is in the paid tier.</p>
 </section>
 <section class="wrap">
-  <div class="chips chips-lg">${items.map((m) => `<a class="chip" href="/markets/${esc(m.slug)}">${esc(m.name)} <b>${m.n}</b></a>`).join('')}</div>
+  <div class="chips chips-lg">${items.map((m) => `<a class="chip" href="/markets/${esc(m.slug)}">${esc(m.name)} <b>${m.operator_count}</b></a>`).join('')}</div>
 </section>`;
   return html(page(env, { title: 'Markets | Property and Technology directory', description: `Rental operators listed across ${items.length} markets.`, path: '/markets', body }));
 }
 
 async function marketPage(env, slug) {
-  const found = await db(env, `markets?slug=eq.${encodeURIComponent(slug)}&select=slug,name,company_markets(company:companies(${LIST_FIELDS}))&limit=1`);
+  const [found, all] = await Promise.all([
+    db(env, `directory_markets?slug=eq.${encodeURIComponent(slug)}&select=*&limit=1`),
+    allCompanies(env),
+  ]);
   const m = found[0];
-  if (!m) return notFound(env);
-  const rows = (m.company_markets || []).map((x) => x.company).filter((c) => c && !c.merged_into)
-    .sort(bySize);
+  if (!m || !m.operator_count) return notFound(env);
+  const bySlug = new Map(all.map((c) => [c.slug, c]));
+  const shown = (m.top_operators || []).slice(0, MARKET_PREVIEW).map((t) => bySlug.get(t.slug)).filter(Boolean);
+  const locked = Math.max(m.operator_count - shown.length, 0);
+  const n = m.operator_count;
   const body = `<section class="hero hero-tight">
   <a class="back" href="/markets">&larr; Markets</a>
   <div class="eyebrow">Market</div>
   <h1>${esc(m.name)}</h1>
-  <p class="sub">${num(rows.length)} ${rows.length === 1 ? 'operator lists' : 'operators list'} this market.</p>
+  <p class="sub">${num(n)} ${n === 1 ? 'operator lists' : 'operators list'} this market.${locked ? ` The largest ${shown.length} are shown here.` : ''}</p>
 </section>
 <section class="wrap">
   <div class="rows">
   ${rowsHead}
-  ${rows.map(companyRow).join('\n  ')}
+  ${shown.map(companyRow).join('\n  ')}
+  ${ghostRows(locked)}
   </div>
+  ${locked ? `<div class="lock-band">${lockCard(env, {
+    eyebrow: 'Paid tier',
+    headline: `${num(locked)} more ${locked === 1 ? 'operator' : 'operators'} in ${esc(m.name)}`,
+    text: 'The paid tier lists every operator in every market, with leaders, signals and CSV export.',
+  })}</div>` : ''}
 </section>`;
-  return html(page(env, { title: `${m.name} rental operators | Property and Technology directory`, description: `${rows.length} rental operators active in ${m.name}.`, path: '/markets', body }));
+  return html(page(env, { title: `${m.name} rental operators | Property and Technology directory`, description: `${n} rental operators active in ${m.name}.`, path: '/markets', body }));
 }
 
 async function sitemap(env, origin) {
   const [companies, markets] = await Promise.all([
     allCompanies(env),
-    db(env, 'markets?select=slug&limit=5000'),
+    db(env, 'directory_markets?select=slug&operator_count=gt.0&limit=5000'),
   ]);
   const urls = ['/', '/markets', ...companies.map((c) => `/companies/${c.slug}`), ...markets.map((m) => `/markets/${m.slug}`)];
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${esc(origin + u)}</loc></url>`).join('\n')}\n</urlset>`;

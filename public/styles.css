@@ -179,3 +179,14 @@ footer{border-top:1px solid var(--line);padding:30px 6vw 40px;max-width:1160px;m
 .fmeta{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--ink-soft);display:flex;gap:20px;flex-wrap:wrap;}
 .fmeta a:hover{color:var(--green);}
 .fnote{margin-top:14px;font-size:15px;color:var(--ink-dim);max-width:70ch;}
+
+/* paid tier: locked lists and placeholder rows */
+.locked-list{list-style:none;display:grid;gap:7px;margin:12px 0 14px;}
+.locked-list li{font-size:16px;color:var(--ink-soft);padding-left:18px;position:relative;}
+.locked-list li::before{content:"";position:absolute;left:2px;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--purple-text);}
+.locked-list b{color:var(--ink);font-weight:600;}
+.row-ghost{pointer-events:none;opacity:.55;}
+.ph{display:block;height:11px;width:70%;border-radius:6px;background:rgba(200,197,218,.13);}
+.ph-l{height:15px;width:55%;margin-bottom:7px;}
+.ph-s{width:40%;}
+.lock-band{margin-top:18px;max-width:560px;}

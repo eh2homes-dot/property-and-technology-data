@@ -22,6 +22,10 @@
     // (entry.1349695603 is that question's ID in the form).
     "REPORT_FORM_URL": "https://docs.google.com/forms/d/e/1FAIpQLSfXeQcIydOk8UasrF7mEozlkO2GylRZzQXT6b6IyuLbmwUTTg/viewform?usp=pp_url&entry.1349695603=",
     // Cloudflare Web Analytics site token. Empty means no visitor tracking.
-    "ANALYTICS_TOKEN": "73b40f0cefca4940b14c777e78284061"
+    "ANALYTICS_TOKEN": "73b40f0cefca4940b14c777e78284061",
+    // Where "Get full access" buttons go: a Stripe checkout or booking link once
+    // the paid tier is priced. Empty sends people to the Origins signup, tagged
+    // utm_campaign=paid-waitlist, so you can see who asked.
+    "PAID_URL": ""
   }
 }
